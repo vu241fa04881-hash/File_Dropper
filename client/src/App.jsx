@@ -25,6 +25,7 @@ import QrModal from './components/QrModal';
 import ImageModal from './components/ImageModal';
 import JoinModal from './components/JoinModal';
 import RenameUserModal from './components/RenameUserModal';
+import ConnectedDevicesModal from './components/ConnectedDevicesModal';
 import TtlModal, { formatTtlLabel } from './components/TtlModal';
 import ToastContainer from './components/ToastContainer';
 
@@ -55,7 +56,9 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('');
   const [roomSlug, setRoomSlug] = useState('');
   const [formattedCode, setFormattedCode] = useState('');
+  const [peers, setPeers] = useState([]);
   const [peerCount, setPeerCount] = useState(1);
+  const [isDevicesModalOpen, setIsDevicesModalOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [peerActivity, setPeerActivity] = useState('');
 
@@ -82,9 +85,20 @@ export default function App() {
   // Toasts
   const [toasts, setToasts] = useState([]);
 
-  // Socket reference
+  // Socket & State references to prevent reconnect churn
   const socketRef = useRef(null);
   const dragCounterRef = useRef(0);
+  const roomCodeRef = useRef('');
+  const userNameRef = useRef(userName);
+  const isInternalHashChangeRef = useRef(false);
+
+  useEffect(() => {
+    roomCodeRef.current = roomCode;
+  }, [roomCode]);
+
+  useEffect(() => {
+    userNameRef.current = userName;
+  }, [userName]);
 
   // Helper for adding toast notifications
   const addToast = useCallback((message, type = 'info') => {
@@ -137,35 +151,42 @@ export default function App() {
   // Save User Name
   const handleSaveUserName = useCallback((newName) => {
     setUserName(newName);
+    userNameRef.current = newName;
     localStorage.setItem('dropper_username', newName);
-    if (socketRef.current && roomCode) {
-      socketRef.current.emit('update-peer-name', { roomCode, peerName: newName });
+    const activeRoom = roomCodeRef.current;
+    if (socketRef.current && activeRoom) {
+      socketRef.current.emit('update-peer-name', {
+        roomCode: activeRoom.toString().trim().toLowerCase().replace(/\s+/g, ''),
+        peerName: newName
+      });
     }
     addToast(`Display name updated to "${newName}"`, 'success');
-  }, [roomCode, addToast]);
+  }, [addToast]);
 
   // Select Transfer Expiration TTL
   const handleSelectTtl = useCallback((newTtl) => {
     setTtlMinutes(newTtl);
-    if (socketRef.current && roomCode) {
+    const activeRoom = roomCodeRef.current;
+    if (socketRef.current && activeRoom) {
       socketRef.current.emit('update-room-ttl', {
-        roomCode,
+        roomCode: activeRoom.toString().trim().toLowerCase().replace(/\s+/g, ''),
         ttlMinutes: newTtl,
-        peerName: userName
+        peerName: userNameRef.current
       });
     }
     addToast(`Room expiration set to ${formatTtlLabel(newTtl)}`, 'success');
-  }, [roomCode, userName, addToast]);
+  }, [addToast]);
 
   // Join Room via Socket.IO
   const joinRoom = useCallback((code) => {
     if (!socketRef.current || !code) return;
+    const cleanCode = code.toString().trim().toLowerCase().replace(/\s+/g, '');
     socketRef.current.emit('join-room', {
-      roomCode: code,
-      peerName: userName,
+      roomCode: cleanCode,
+      peerName: userNameRef.current,
       senderId: CLIENT_ID
     });
-  }, [userName]);
+  }, []);
 
   // Request fresh session
   const requestNewSession = useCallback(() => {
@@ -173,11 +194,11 @@ export default function App() {
     socketRef.current.emit('request-new-session');
   }, []);
 
-  // Initialize Socket.IO connection
+  // Initialize Socket.IO connection ONCE on mount
   useEffect(() => {
     const socket = io(window.location.origin, {
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
     });
     socketRef.current = socket;
 
@@ -185,9 +206,14 @@ export default function App() {
       setIsConnected(true);
       const urlCode = getCodeFromUrl();
       if (urlCode) {
-        joinRoom(urlCode);
+        const clean = urlCode.toString().trim().toLowerCase().replace(/\s+/g, '');
+        socket.emit('join-room', {
+          roomCode: clean,
+          peerName: userNameRef.current,
+          senderId: CLIENT_ID
+        });
       } else {
-        requestNewSession();
+        socket.emit('request-new-session');
       }
     });
 
@@ -201,14 +227,23 @@ export default function App() {
       setRoomSlug(data.slug);
       setFormattedCode(data.formattedCode);
       setItems(data.items || []);
+      setPeers(data.peers || []);
       setPeerCount(data.peerCount || 1);
       setTtlMinutes(data.ttlMinutes || 15);
-      window.location.hash = `#code=${data.code}`;
+      roomCodeRef.current = data.code;
+
+      // Update URL hash safely without triggering infinite hashchange loop
+      const targetHash = `#code=${data.code}`;
+      if (window.location.hash !== targetHash) {
+        isInternalHashChangeRef.current = true;
+        window.location.hash = targetHash;
+      }
     });
 
     // Peer joined event
     socket.on('peer-joined', (data) => {
       setPeerCount(data.peerCount);
+      if (data.peers) setPeers(data.peers);
       playPeerConnectSound();
       addToast(`🎉 ${data.peerName || 'Device'} paired! (${data.peerCount} active)`, 'success');
       confetti({
@@ -221,11 +256,13 @@ export default function App() {
     // Peer left event
     socket.on('peer-left', (data) => {
       setPeerCount(data.peerCount || 1);
+      if (data.peers) setPeers(data.peers);
       addToast(`Device disconnected (${data.peerCount} active)`, 'info');
     });
 
     // Peer renamed event
     socket.on('peer-renamed', (data) => {
+      if (data.peers) setPeers(data.peers);
       addToast(`A connected device renamed to "${data.peerName}"`, 'info');
     });
 
@@ -241,9 +278,16 @@ export default function App() {
       setRoomSlug(data.slug);
       setFormattedCode(data.formattedCode);
       setItems([]);
+      setPeers([{ socketId: socket.id, peerName: userNameRef.current, senderId: CLIENT_ID, joinedAt: Date.now() }]);
       setPeerCount(1);
       setTtlMinutes(15);
-      window.location.hash = `#code=${data.code}`;
+      roomCodeRef.current = data.code;
+
+      const targetHash = `#code=${data.code}`;
+      if (window.location.hash !== targetHash) {
+        isInternalHashChangeRef.current = true;
+        window.location.hash = targetHash;
+      }
       addToast(`Fresh room generated: ${data.formattedCode}`, 'success');
     });
 
@@ -282,11 +326,20 @@ export default function App() {
       }
     });
 
-    // Listen for browser URL hash changes
+    // Listen for external browser URL hash changes
     const handleHashChange = () => {
+      if (isInternalHashChangeRef.current) {
+        isInternalHashChangeRef.current = false;
+        return;
+      }
       const newCode = getCodeFromUrl();
-      if (newCode && newCode !== roomCode) {
-        joinRoom(newCode);
+      if (newCode && newCode !== roomCodeRef.current) {
+        const clean = newCode.toString().trim().toLowerCase().replace(/\s+/g, '');
+        socket.emit('join-room', {
+          roomCode: clean,
+          peerName: userNameRef.current,
+          senderId: CLIENT_ID
+        });
       }
     };
     window.addEventListener('hashchange', handleHashChange);
@@ -295,23 +348,25 @@ export default function App() {
       window.removeEventListener('hashchange', handleHashChange);
       socket.disconnect();
     };
-  }, [joinRoom, requestNewSession, addToast, roomCode]);
+  }, [addToast]);
 
   // Upload files handler with progress tracking
   const uploadFiles = useCallback(async (files) => {
-    if (!files || files.length === 0 || !roomCode) return;
+    const activeRoom = roomCodeRef.current || roomCode;
+    if (!files || files.length === 0 || !activeRoom) return;
 
     setIsUploading(true);
     setUploadProgress(0);
 
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
-    formData.append('senderName', userName);
+    formData.append('senderName', userNameRef.current);
     formData.append('senderId', CLIENT_ID);
 
     try {
+      const cleanRoom = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `/api/upload/${roomCode}`);
+      xhr.open('POST', `/api/upload/${cleanRoom}`);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -343,7 +398,7 @@ export default function App() {
       setIsUploading(false);
       addToast('Upload error', 'error');
     }
-  }, [roomCode, addToast, userName]);
+  }, [addToast, roomCode]);
 
   // Global Drag and Drop event listeners
   useEffect(() => {
@@ -353,8 +408,10 @@ export default function App() {
       dragCounterRef.current += 1;
       if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
         setIsDragging(true);
-        if (socketRef.current && roomCode) {
-          socketRef.current.emit('peer-activity', { roomCode, activity: 'dragging', active: true });
+        const activeRoom = roomCodeRef.current || roomCode;
+        if (socketRef.current && activeRoom) {
+          const clean = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
+          socketRef.current.emit('peer-activity', { roomCode: clean, activity: 'dragging', active: true });
         }
       }
     };
@@ -366,8 +423,10 @@ export default function App() {
       if (dragCounterRef.current <= 0) {
         dragCounterRef.current = 0;
         setIsDragging(false);
-        if (socketRef.current && roomCode) {
-          socketRef.current.emit('peer-activity', { roomCode, activity: 'dragging', active: false });
+        const activeRoom = roomCodeRef.current || roomCode;
+        if (socketRef.current && activeRoom) {
+          const clean = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
+          socketRef.current.emit('peer-activity', { roomCode: clean, activity: 'dragging', active: false });
         }
       }
     };
@@ -383,8 +442,10 @@ export default function App() {
       dragCounterRef.current = 0;
       setIsDragging(false);
 
-      if (socketRef.current && roomCode) {
-        socketRef.current.emit('peer-activity', { roomCode, activity: 'dragging', active: false });
+      const activeRoom = roomCodeRef.current || roomCode;
+      if (socketRef.current && activeRoom) {
+        const clean = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
+        socketRef.current.emit('peer-activity', { roomCode: clean, activity: 'dragging', active: false });
       }
 
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -408,7 +469,6 @@ export default function App() {
   // Global Clipboard Paste Listener (Ctrl+V anywhere)
   useEffect(() => {
     const handlePaste = async (e) => {
-      // Don't intercept paste if user is typing inside an input or textarea
       const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
       if (activeTag === 'input' || activeTag === 'textarea') {
         return;
@@ -420,13 +480,16 @@ export default function App() {
       const items = clipboardData.items;
       if (!items || items.length === 0) return;
 
+      const activeRoom = roomCodeRef.current || roomCode;
+      if (!activeRoom) return;
+      const cleanRoom = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
+
       // 1. Check for image files on clipboard
       const imageFiles = [];
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
           const file = items[i].getAsFile();
           if (file) {
-            // Rename to meaningful screenshot name if generic
             const ext = file.type.split('/')[1] || 'png';
             const screenshotFile = new File([file], `screenshot-${Date.now()}.${ext}`, { type: file.type });
             imageFiles.push(screenshotFile);
@@ -445,30 +508,27 @@ export default function App() {
       const pastedText = clipboardData.getData('text');
       if (pastedText && pastedText.trim().length > 0) {
         e.preventDefault();
-        // Check if text looks like code (multiple lines with common code symbols)
         const isLikelyCode = (
           pastedText.includes('\n') && 
           (pastedText.includes('{') || pastedText.includes('function') || pastedText.includes('const ') || pastedText.includes('def ') || pastedText.includes('import ') || pastedText.includes('class '))
         );
 
         if (isLikelyCode && pastedText.split('\n').length >= 3) {
-          // Send as code snippet
           socketRef.current?.emit('send-code', {
-            roomCode,
+            roomCode: cleanRoom,
             code: pastedText.trim(),
             language: 'javascript',
             title: 'Clipboard Code Snippet',
-            senderName: userName,
+            senderName: userNameRef.current,
             senderId: CLIENT_ID
           });
           playSendSound();
           addToast('Pasted code snippet from clipboard!', 'success');
         } else {
-          // Send as text / link
           socketRef.current?.emit('send-text', {
-            roomCode,
+            roomCode: cleanRoom,
             text: pastedText.trim(),
-            senderName: userName,
+            senderName: userNameRef.current,
             senderId: CLIENT_ID
           });
           playSendSound();
@@ -479,17 +539,19 @@ export default function App() {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [uploadFiles, roomCode, addToast, userName]);
+  }, [uploadFiles, roomCode, addToast]);
 
   // Send Code Snippet handler
   const handleSendCode = ({ code, language, title }) => {
-    if (!socketRef.current || !roomCode) return;
+    const activeRoom = roomCodeRef.current || roomCode;
+    if (!socketRef.current || !activeRoom || !code.trim()) return;
+    const cleanRoom = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
     socketRef.current.emit('send-code', {
-      roomCode,
-      code,
+      roomCode: cleanRoom,
+      code: code.trim(),
       language,
       title,
-      senderName: userName,
+      senderName: userNameRef.current,
       senderId: CLIENT_ID
     });
     playSendSound();
@@ -498,11 +560,13 @@ export default function App() {
 
   // Send Text handler
   const handleSendText = (text) => {
-    if (!socketRef.current || !roomCode) return;
+    const activeRoom = roomCodeRef.current || roomCode;
+    if (!socketRef.current || !activeRoom || !text.trim()) return;
+    const cleanRoom = activeRoom.toString().trim().toLowerCase().replace(/\s+/g, '');
     socketRef.current.emit('send-text', {
-      roomCode,
-      text,
-      senderName: userName,
+      roomCode: cleanRoom,
+      text: text.trim(),
+      senderName: userNameRef.current,
       senderId: CLIENT_ID
     });
     playSendSound();
@@ -541,6 +605,7 @@ export default function App() {
         peerCount={peerCount}
         userName={userName}
         onOpenRenameModal={() => setIsRenameModalOpen(true)}
+        onOpenDevicesModal={() => setIsDevicesModalOpen(true)}
         ttlMinutes={ttlMinutes}
         onOpenTtlModal={() => setIsTtlModalOpen(true)}
         onNewTransfer={requestNewSession}
@@ -716,6 +781,14 @@ export default function App() {
         onClose={() => setIsTtlModalOpen(false)}
         currentTtl={ttlMinutes}
         onSelectTtl={handleSelectTtl}
+      />
+
+      <ConnectedDevicesModal
+        isOpen={isDevicesModalOpen}
+        onClose={() => setIsDevicesModalOpen(false)}
+        peers={peers}
+        currentClientId={CLIENT_ID}
+        onOpenQr={() => setIsQrModalOpen(true)}
       />
 
       {/* Toast Notifications */}

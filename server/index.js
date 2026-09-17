@@ -101,7 +101,7 @@ function getOrCreateRoom(codeOrSlug) {
     lastActivity: Date.now(),
     ttlMinutes: 15, // default 15 minutes, configurable to 30, 60, 1440, or 'infinity'
     items: [],
-    peers: new Set()
+    peers: new Map() // socketId -> { socketId, peerName, senderId, joinedAt }
   };
 
   rooms.set(normalizeCode(code), room);
@@ -332,7 +332,7 @@ setInterval(cleanupExpiredTransfers, 60 * 1000);
 io.on('connection', (socket) => {
   let currentRoomCode = null;
 
-  socket.on('join-room', ({ roomCode, peerName }) => {
+  socket.on('join-room', ({ roomCode, peerName, senderId }) => {
     if (!roomCode) return;
     const room = getOrCreateRoom(roomCode);
     const normalized = normalizeCode(room.code);
@@ -344,6 +344,7 @@ io.on('connection', (socket) => {
         prevRoom.peers.delete(socket.id);
         io.to(currentRoomCode).emit('peer-left', {
           socketId: socket.id,
+          peers: Array.from(prevRoom.peers.values()),
           peerCount: prevRoom.peers.size
         });
       }
@@ -351,24 +352,33 @@ io.on('connection', (socket) => {
 
     currentRoomCode = normalized;
     socket.join(normalized);
-    room.peers.add(socket.id);
+
+    const peerInfo = {
+      socketId: socket.id,
+      peerName: peerName || 'A device',
+      senderId: senderId || socket.id,
+      joinedAt: Date.now()
+    };
+    room.peers.set(socket.id, peerInfo);
     room.lastActivity = Date.now();
 
-    // Send full room state to the newly connected peer
+    // Send full room state & peers to the newly connected peer
     socket.emit('room-joined', {
       code: room.code,
       slug: room.slug,
       formattedCode: `${room.code.slice(0, 3)} ${room.code.slice(3)}`,
       items: room.items,
+      peers: Array.from(room.peers.values()),
       peerCount: room.peers.size,
       ttlMinutes: room.ttlMinutes || 15,
       createdAt: room.createdAt
     });
 
-    // Notify other peers in the room
+    // Notify other peers in the room with updated peer list
     socket.to(normalized).emit('peer-joined', {
-      socketId: socket.id,
-      peerName: peerName || 'A peer',
+      peer: peerInfo,
+      peers: Array.from(room.peers.values()),
+      peerName: peerInfo.peerName,
       peerCount: room.peers.size
     });
   });
@@ -432,9 +442,15 @@ io.on('connection', (socket) => {
   // Peer renamed handler
   socket.on('update-peer-name', ({ roomCode, peerName }) => {
     if (!roomCode || !peerName) return;
-    socket.to(normalizeCode(roomCode)).emit('peer-renamed', {
+    const room = getOrCreateRoom(roomCode);
+    if (room.peers.has(socket.id)) {
+      const peer = room.peers.get(socket.id);
+      peer.peerName = peerName.trim();
+    }
+    io.to(normalizeCode(room.code)).emit('peer-renamed', {
       socketId: socket.id,
-      peerName: peerName.trim()
+      peerName: peerName.trim(),
+      peers: Array.from(room.peers.values())
     });
   });
 
@@ -482,6 +498,7 @@ io.on('connection', (socket) => {
         room.peers.delete(socket.id);
         io.to(currentRoomCode).emit('peer-left', {
           socketId: socket.id,
+          peers: Array.from(room.peers.values()),
           peerCount: room.peers.size
         });
       }

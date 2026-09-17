@@ -27,6 +27,7 @@ export default function Header({
   peerCount,
   userName,
   onOpenRenameModal,
+  onOpenDevicesModal,
   ttlMinutes,
   onOpenTtlModal,
   onNewTransfer,
@@ -93,15 +94,16 @@ export default function Header({
         {/* Room Code & Connection pill */}
         {roomCode ? (
           <div className="flex items-center gap-2 bg-slate-900/80 dark:bg-slate-900/80 border border-white/10 rounded-2xl p-1.5 shadow-inner">
-            {/* Peer count badge */}
-            <div 
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 text-xs font-medium text-slate-300 border border-white/5"
-              title={`${peerCount} active device${peerCount === 1 ? '' : 's'} connected in this room`}
+            {/* Peer count badge / view connected devices button */}
+            <button
+              onClick={onOpenDevicesModal}
+              title={`Click to see all ${peerCount} connected devices`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-xs font-medium text-slate-300 hover:text-white border border-white/5 hover:border-cyan-500/30 transition-all cursor-pointer active:scale-95 group shadow-inner"
             >
-              <Users className="w-3.5 h-3.5 text-cyan-400" />
+              <Users className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
               <span>{peerCount} {peerCount === 1 ? 'device' : 'devices'}</span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            </div>
+            </button>
 
             {/* Room Identifier Display */}
             <div className="flex items-center gap-1.5 px-3 py-1">
