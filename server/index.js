@@ -414,6 +414,15 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Peer renamed handler
+  socket.on('update-peer-name', ({ roomCode, peerName }) => {
+    if (!roomCode || !peerName) return;
+    socket.to(normalizeCode(roomCode)).emit('peer-renamed', {
+      socketId: socket.id,
+      peerName: peerName.trim()
+    });
+  });
+
   // Request new session / reset room
   socket.on('request-new-session', () => {
     let newCode = generate6DigitCode();

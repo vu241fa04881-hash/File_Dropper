@@ -23,6 +23,7 @@ import TextModal from './components/TextModal';
 import QrModal from './components/QrModal';
 import ImageModal from './components/ImageModal';
 import JoinModal from './components/JoinModal';
+import RenameUserModal from './components/RenameUserModal';
 import ToastContainer from './components/ToastContainer';
 
 import { 
@@ -35,12 +36,18 @@ import {
 
 // Unique client identifier for this tab/device
 const CLIENT_ID = 'client_' + Math.random().toString(36).substring(2, 9);
-const CLIENT_NAME = 'Device ' + CLIENT_ID.slice(-3).toUpperCase();
+const DEFAULT_NAME = 'Device ' + CLIENT_ID.slice(-3).toUpperCase();
 
 export default function App() {
   // Theme & Sound state
   const [isDark, setIsDark] = useState(true);
   const [isMuted, setIsMuted] = useState(getAudioMuted());
+
+  // User Display Name state (persisted in localStorage)
+  const [userName, setUserName] = useState(() => {
+    return localStorage.getItem('dropper_username') || DEFAULT_NAME;
+  });
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
 
   // Room & Connection state
   const [roomCode, setRoomCode] = useState('');
@@ -121,15 +128,25 @@ export default function App() {
     return null;
   };
 
+  // Save User Name
+  const handleSaveUserName = useCallback((newName) => {
+    setUserName(newName);
+    localStorage.setItem('dropper_username', newName);
+    if (socketRef.current && roomCode) {
+      socketRef.current.emit('update-peer-name', { roomCode, peerName: newName });
+    }
+    addToast(`Display name updated to "${newName}"`, 'success');
+  }, [roomCode, addToast]);
+
   // Join Room via Socket.IO
   const joinRoom = useCallback((code) => {
     if (!socketRef.current || !code) return;
     socketRef.current.emit('join-room', {
       roomCode: code,
-      peerName: CLIENT_NAME,
+      peerName: userName,
       senderId: CLIENT_ID
     });
-  }, []);
+  }, [userName]);
 
   // Request fresh session
   const requestNewSession = useCallback(() => {
@@ -173,7 +190,7 @@ export default function App() {
     socket.on('peer-joined', (data) => {
       setPeerCount(data.peerCount);
       playPeerConnectSound();
-      addToast(`🎉 Device paired! (${data.peerCount} devices active)`, 'success');
+      addToast(`🎉 ${data.peerName || 'Device'} paired! (${data.peerCount} active)`, 'success');
       confetti({
         particleCount: 50,
         spread: 60,
@@ -185,6 +202,11 @@ export default function App() {
     socket.on('peer-left', (data) => {
       setPeerCount(data.peerCount || 1);
       addToast(`Device disconnected (${data.peerCount} active)`, 'info');
+    });
+
+    // Peer renamed event
+    socket.on('peer-renamed', (data) => {
+      addToast(`A connected device renamed to "${data.peerName}"`, 'info');
     });
 
     // Session created response
@@ -257,7 +279,7 @@ export default function App() {
 
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
-    formData.append('senderName', CLIENT_NAME);
+    formData.append('senderName', userName);
     formData.append('senderId', CLIENT_ID);
 
     try {
@@ -294,7 +316,7 @@ export default function App() {
       setIsUploading(false);
       addToast('Upload error', 'error');
     }
-  }, [roomCode, addToast]);
+  }, [roomCode, addToast, userName]);
 
   // Global Drag and Drop event listeners
   useEffect(() => {
@@ -409,7 +431,7 @@ export default function App() {
             code: pastedText.trim(),
             language: 'javascript',
             title: 'Clipboard Code Snippet',
-            senderName: CLIENT_NAME,
+            senderName: userName,
             senderId: CLIENT_ID
           });
           playSendSound();
@@ -419,7 +441,7 @@ export default function App() {
           socketRef.current?.emit('send-text', {
             roomCode,
             text: pastedText.trim(),
-            senderName: CLIENT_NAME,
+            senderName: userName,
             senderId: CLIENT_ID
           });
           playSendSound();
@@ -430,7 +452,7 @@ export default function App() {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [uploadFiles, roomCode, addToast]);
+  }, [uploadFiles, roomCode, addToast, userName]);
 
   // Send Code Snippet handler
   const handleSendCode = ({ code, language, title }) => {
@@ -440,7 +462,7 @@ export default function App() {
       code,
       language,
       title,
-      senderName: CLIENT_NAME,
+      senderName: userName,
       senderId: CLIENT_ID
     });
     playSendSound();
@@ -453,7 +475,7 @@ export default function App() {
     socketRef.current.emit('send-text', {
       roomCode,
       text,
-      senderName: CLIENT_NAME,
+      senderName: userName,
       senderId: CLIENT_ID
     });
     playSendSound();
@@ -490,6 +512,8 @@ export default function App() {
         roomSlug={roomSlug}
         formattedCode={formattedCode}
         peerCount={peerCount}
+        userName={userName}
+        onOpenRenameModal={() => setIsRenameModalOpen(true)}
         onNewTransfer={requestNewSession}
         onOpenQr={() => setIsQrModalOpen(true)}
         onOpenJoinModal={() => setIsJoinModalOpen(true)}
@@ -582,6 +606,7 @@ export default function App() {
               <ItemCard
                 key={item.id}
                 item={item}
+                currentClientId={CLIENT_ID}
                 onOpenImageModal={(url, name) => setSelectedImage({ url, name })}
                 addToast={addToast}
               />
@@ -643,6 +668,13 @@ export default function App() {
         imageUrl={selectedImage?.url}
         fileName={selectedImage?.name}
         addToast={addToast}
+      />
+
+      <RenameUserModal
+        isOpen={isRenameModalOpen}
+        onClose={() => setIsRenameModalOpen(false)}
+        currentName={userName}
+        onSaveName={handleSaveUserName}
       />
 
       {/* Toast Notifications */}

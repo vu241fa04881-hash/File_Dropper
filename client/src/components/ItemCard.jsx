@@ -26,7 +26,7 @@ import 'prismjs/components/prism-bash';
 import { formatBytes, formatTime, copyToClipboard, copyImageToClipboard } from '../utils/helpers';
 import { playCopySound } from '../utils/audio';
 
-export default function ItemCard({ item, onOpenImageModal, addToast }) {
+export default function ItemCard({ item, currentClientId, onOpenImageModal, addToast }) {
   const [copied, setCopied] = useState(false);
   const [isCopyingImage, setIsCopyingImage] = useState(false);
   const codeRef = useRef(null);
@@ -84,6 +84,8 @@ export default function ItemCard({ item, onOpenImageModal, addToast }) {
     addToast('Code downloaded as file!', 'success');
   };
 
+  const isSelf = currentClientId && item.senderId === currentClientId;
+
   return (
     <article className="glass-card rounded-2xl p-4 sm:p-5 border border-white/10 flex flex-col justify-between overflow-hidden group">
       {/* Header Info: Sender, Time & Type Badge */}
@@ -91,7 +93,12 @@ export default function ItemCard({ item, onOpenImageModal, addToast }) {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 font-medium text-slate-300">
             <User className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{item.sender || 'Peer'}</span>
+            <span className="truncate max-w-[120px]">{item.sender || 'Peer'}</span>
+            {isSelf && (
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-cyan-500/15 text-cyan-300 rounded border border-cyan-500/30">
+                You
+              </span>
+            )}
           </div>
           <span>•</span>
           <div className="flex items-center gap-1">

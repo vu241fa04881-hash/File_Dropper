@@ -12,7 +12,9 @@ import {
   Moon, 
   RefreshCw,
   Sparkles,
-  ArrowRightLeft
+  ArrowRightLeft,
+  User,
+  Pencil
 } from 'lucide-react';
 import { copyToClipboard } from '../utils/helpers';
 import { playCopySound } from '../utils/audio';
@@ -22,6 +24,8 @@ export default function Header({
   roomSlug,
   formattedCode,
   peerCount,
+  userName,
+  onOpenRenameModal,
   onNewTransfer,
   onOpenQr,
   onOpenJoinModal,
@@ -150,6 +154,19 @@ export default function Header({
 
         {/* Global Controls & Primary New Transfer CTA */}
         <div className="flex items-center gap-2">
+          {/* User Display Name Pill */}
+          {userName && (
+            <button
+              onClick={onOpenRenameModal}
+              title={`Your display name is "${userName}". Click to rename.`}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 border border-white/5 hover:border-cyan-500/30 text-xs font-medium transition-all group active:scale-95 shadow-inner"
+            >
+              <User className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="truncate max-w-[85px] sm:max-w-[120px]">{userName}</span>
+              <Pencil className="w-3 h-3 text-slate-400 group-hover:text-cyan-400 transition-colors ml-0.5" />
+            </button>
+          )}
+
           {/* Audio Mute Toggle */}
           <button
             onClick={onToggleMute}
