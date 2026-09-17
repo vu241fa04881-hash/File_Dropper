@@ -593,7 +593,14 @@ export default function App() {
   const hasFiles = items.some((item) => ['file', 'image', 'video', 'audio'].includes(item.type));
 
   return (
-    <div className="min-h-screen flex flex-col justify-between selection:bg-cyan-500/30">
+    <div className="min-h-screen flex flex-col justify-between selection:bg-cyan-500/30 relative">
+      {/* External Dynamic Background Wallpaper */}
+      <div className={`bg-wallpaper ${isDark ? 'bg-wallpaper-dark' : 'bg-wallpaper-light'}`} />
+
+      {/* Ambient Animated Glow Orbs */}
+      <div className="ambient-orb-1" />
+      <div className="ambient-orb-2" />
+
       {/* Full-window Drag Overlay */}
       <DropZoneOverlay isDragging={isDragging} />
 
