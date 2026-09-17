@@ -14,7 +14,8 @@ import {
   Sparkles,
   ArrowRightLeft,
   User,
-  Pencil
+  Pencil,
+  Clock
 } from 'lucide-react';
 import { copyToClipboard } from '../utils/helpers';
 import { playCopySound } from '../utils/audio';
@@ -26,6 +27,8 @@ export default function Header({
   peerCount,
   userName,
   onOpenRenameModal,
+  ttlMinutes,
+  onOpenTtlModal,
   onNewTransfer,
   onOpenQr,
   onOpenJoinModal,
@@ -139,6 +142,15 @@ export default function Header({
               className="p-2 rounded-xl bg-white/5 hover:bg-cyan-500/20 text-slate-300 hover:text-cyan-300 transition-all border border-transparent hover:border-cyan-500/30 active:scale-95"
             >
               <QrCode className="w-4 h-4" />
+            </button>
+
+            {/* Expiration Timer button */}
+            <button
+              onClick={onOpenTtlModal}
+              title="Change transfer expiration time (15m, 30m, 1h, 24h, Infinity)"
+              className="p-2 rounded-xl bg-white/5 hover:bg-amber-500/20 text-slate-300 hover:text-amber-400 transition-all border border-transparent hover:border-amber-500/30 active:scale-95"
+            >
+              <Clock className="w-4 h-4" />
             </button>
 
             {/* Join other room button */}

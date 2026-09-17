@@ -11,7 +11,8 @@ import {
   Trash2,
   Inbox,
   Filter,
-  Layers
+  Layers,
+  ChevronDown
 } from 'lucide-react';
 
 import Header from './components/Header';
@@ -24,6 +25,7 @@ import QrModal from './components/QrModal';
 import ImageModal from './components/ImageModal';
 import JoinModal from './components/JoinModal';
 import RenameUserModal from './components/RenameUserModal';
+import TtlModal, { formatTtlLabel } from './components/TtlModal';
 import ToastContainer from './components/ToastContainer';
 
 import { 
@@ -65,6 +67,10 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Expiration TTL state (15, 30, 60, 1440, or 'infinity')
+  const [ttlMinutes, setTtlMinutes] = useState(15);
+  const [isTtlModalOpen, setIsTtlModalOpen] = useState(false);
 
   // Modals state
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
@@ -138,6 +144,19 @@ export default function App() {
     addToast(`Display name updated to "${newName}"`, 'success');
   }, [roomCode, addToast]);
 
+  // Select Transfer Expiration TTL
+  const handleSelectTtl = useCallback((newTtl) => {
+    setTtlMinutes(newTtl);
+    if (socketRef.current && roomCode) {
+      socketRef.current.emit('update-room-ttl', {
+        roomCode,
+        ttlMinutes: newTtl,
+        peerName: userName
+      });
+    }
+    addToast(`Room expiration set to ${formatTtlLabel(newTtl)}`, 'success');
+  }, [roomCode, userName, addToast]);
+
   // Join Room via Socket.IO
   const joinRoom = useCallback((code) => {
     if (!socketRef.current || !code) return;
@@ -183,6 +202,7 @@ export default function App() {
       setFormattedCode(data.formattedCode);
       setItems(data.items || []);
       setPeerCount(data.peerCount || 1);
+      setTtlMinutes(data.ttlMinutes || 15);
       window.location.hash = `#code=${data.code}`;
     });
 
@@ -209,6 +229,12 @@ export default function App() {
       addToast(`A connected device renamed to "${data.peerName}"`, 'info');
     });
 
+    // Room TTL updated event
+    socket.on('room-ttl-updated', (data) => {
+      setTtlMinutes(data.ttlMinutes);
+      addToast(`Expiration updated to ${formatTtlLabel(data.ttlMinutes)} by ${data.peerName}`, 'info');
+    });
+
     // Session created response
     socket.on('session-created', (data) => {
       setRoomCode(data.code);
@@ -216,6 +242,7 @@ export default function App() {
       setFormattedCode(data.formattedCode);
       setItems([]);
       setPeerCount(1);
+      setTtlMinutes(15);
       window.location.hash = `#code=${data.code}`;
       addToast(`Fresh room generated: ${data.formattedCode}`, 'success');
     });
@@ -514,6 +541,8 @@ export default function App() {
         peerCount={peerCount}
         userName={userName}
         onOpenRenameModal={() => setIsRenameModalOpen(true)}
+        ttlMinutes={ttlMinutes}
+        onOpenTtlModal={() => setIsTtlModalOpen(true)}
         onNewTransfer={requestNewSession}
         onOpenQr={() => setIsQrModalOpen(true)}
         onOpenJoinModal={() => setIsJoinModalOpen(true)}
@@ -563,10 +592,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Transfers expire in 15m</span>
-            </span>
+            <button
+              onClick={() => setIsTtlModalOpen(true)}
+              title="Click to edit transfer expiration time"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/5 hover:border-amber-500/40 transition-all group active:scale-95 shadow-inner"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-400 group-hover:animate-pulse" />
+              <span>Expires: <strong className="text-amber-300 font-semibold">{formatTtlLabel(ttlMinutes)}</strong></span>
+              <ChevronDown className="w-3 h-3 text-slate-500 group-hover:text-amber-400 transition-colors ml-0.5" />
+            </button>
             <span className="hidden sm:inline">•</span>
             <span className="hidden sm:flex items-center gap-1.5 text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -675,6 +709,13 @@ export default function App() {
         onClose={() => setIsRenameModalOpen(false)}
         currentName={userName}
         onSaveName={handleSaveUserName}
+      />
+
+      <TtlModal
+        isOpen={isTtlModalOpen}
+        onClose={() => setIsTtlModalOpen(false)}
+        currentTtl={ttlMinutes}
+        onSelectTtl={handleSelectTtl}
       />
 
       {/* Toast Notifications */}

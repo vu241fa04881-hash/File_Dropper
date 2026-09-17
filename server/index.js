@@ -99,6 +99,7 @@ function getOrCreateRoom(codeOrSlug) {
     slug,
     createdAt: Date.now(),
     lastActivity: Date.now(),
+    ttlMinutes: 15, // default 15 minutes, configurable to 30, 60, 1440, or 'infinity'
     items: [],
     peers: new Set()
   };
@@ -126,7 +127,8 @@ app.get('/api/rooms/new', (req, res) => {
   res.json({
     code: room.code,
     slug: room.slug,
-    formattedCode: `${room.code.slice(0, 3)} ${room.code.slice(3)}`
+    formattedCode: `${room.code.slice(0, 3)} ${room.code.slice(3)}`,
+    ttlMinutes: room.ttlMinutes || 15
   });
 });
 
@@ -155,6 +157,7 @@ app.post('/api/upload/:roomCode', upload.array('files'), (req, res) => {
       mimeType: mime,
       size: file.size,
       createdAt: Date.now(),
+      ttlMinutes: room.ttlMinutes || 15,
       roomCode: room.code
     };
 
@@ -283,9 +286,15 @@ function cleanupExpiredTransfers() {
   let deletedFilesCount = 0;
   let closedRoomsCount = 0;
 
-  // 1. Delete expired files
+  // 1. Delete expired files based on their specific room TTL
   for (const [fileId, fileMeta] of filesRegistry.entries()) {
-    if (now - fileMeta.createdAt > ROOM_TTL_MS) {
+    const ttl = fileMeta.ttlMinutes ?? 15;
+    if (ttl === 'infinity' || ttl === 0) {
+      continue; // Infinite retention transfers do not expire automatically
+    }
+
+    const ttlMs = Number(ttl) * 60 * 1000;
+    if (now - fileMeta.createdAt > ttlMs) {
       try {
         if (fs.existsSync(fileMeta.storedPath)) {
           fs.unlinkSync(fileMeta.storedPath);
@@ -300,7 +309,13 @@ function cleanupExpiredTransfers() {
 
   // 2. Clear expired rooms that have no active peers and exceeded TTL
   for (const [codeKey, room] of rooms.entries()) {
-    if (now - room.lastActivity > ROOM_TTL_MS && (!room.peers || room.peers.size === 0)) {
+    const ttl = room.ttlMinutes ?? 15;
+    if (ttl === 'infinity' || ttl === 0) {
+      continue;
+    }
+
+    const ttlMs = Number(ttl) * 60 * 1000;
+    if (now - room.lastActivity > ttlMs && (!room.peers || room.peers.size === 0)) {
       rooms.delete(codeKey);
       closedRoomsCount++;
     }
@@ -346,7 +361,7 @@ io.on('connection', (socket) => {
       formattedCode: `${room.code.slice(0, 3)} ${room.code.slice(3)}`,
       items: room.items,
       peerCount: room.peers.size,
-      ttlMs: ROOM_TTL_MS,
+      ttlMinutes: room.ttlMinutes || 15,
       createdAt: room.createdAt
     });
 
@@ -420,6 +435,26 @@ io.on('connection', (socket) => {
     socket.to(normalizeCode(roomCode)).emit('peer-renamed', {
       socketId: socket.id,
       peerName: peerName.trim()
+    });
+  });
+
+  // Update room TTL expiration handler
+  socket.on('update-room-ttl', ({ roomCode, ttlMinutes, peerName }) => {
+    if (!roomCode || ttlMinutes === undefined) return;
+    const room = getOrCreateRoom(roomCode);
+    room.ttlMinutes = ttlMinutes;
+    room.lastActivity = Date.now();
+
+    // Update existing files in room
+    for (const [_, fileMeta] of filesRegistry.entries()) {
+      if (fileMeta.roomCode === room.code) {
+        fileMeta.ttlMinutes = ttlMinutes;
+      }
+    }
+
+    io.to(normalizeCode(room.code)).emit('room-ttl-updated', {
+      ttlMinutes,
+      peerName: peerName || 'A peer'
     });
   });
 
