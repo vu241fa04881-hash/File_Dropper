@@ -454,6 +454,6 @@ if (fs.existsSync(CLIENT_DIST)) {
   });
 }
 
-server.listen(PORT, () => {
-  console.log(`🚀 Dropper backend & Socket.IO server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Dropper backend & Socket.IO server running on port ${PORT}`);
 });
